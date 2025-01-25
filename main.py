@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from database import database 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from bson import ObjectId
 import logging
 import random
@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 # Define the collection name
 COLLECTION_NAME = "dictionary"
+user_story = "userstory"
 
 
 # ------------------------------------------------------------------------------------------------------------------------------
@@ -308,3 +309,214 @@ async def edit_answer(question_id: str, old_answer: str, new_answer: str):
         # Log unexpected errors
         logger.error(f"An error occurred in edit_answer function: {e}")
         raise HTTPException(status_code=500, detail=f"edit_answer: {e}")
+    
+ 
+# ------------------------------------------------------------------------------------------------------------------------------
+# Define the collection name
+user_story_collection = "userstory"
+
+# ------------------------------------------------------------------------------------------------------------------------------
+class UserStory(BaseModel):
+    user_id: str
+    user_name: str
+    user_question: str
+    user_answer: str
+    date_of_question: str
+
+# Add a new answer to a question
+@app.post("/add_user_story")
+async def add_user_story(user_story: UserStory):
+    try:
+
+       # Prepare the document to insert
+        user_story_document = {
+                "user_id": user_story.user_id,
+                "user_name": user_story.user_name,
+                "user_question": user_story.user_question,
+                "user_answer": user_story.user_answer,
+                "date_of_question": user_story.date_of_question,
+        }
+
+        # Insert the document into the collection
+        collection = database[user_story_collection]
+
+        result = collection.insert_one(user_story_document)
+
+        # Return success message with the inserted ID
+        return {
+            "message": "Question added successfully",
+            "question_id": str(result.inserted_id),
+        }
+    
+    except Exception as e:
+        # Log unexpected errors
+        logger.error(f"An error occurred in add_user_story function: {e}")
+        raise HTTPException(status_code=500, detail=f"add_user_story: {e}")
+
+
+
+
+
+
+# ------------------------------------------------------------------------------------------------------------------------------
+# Define the collection name
+USER_COLLECTION = "user"
+
+# ------------------------------------------------------------------------------------------------------------------------------
+class AddUser(BaseModel):
+    user_id: str
+    user_first_name: str
+    user_last_name: str
+    user_about: str
+    user_image: str
+    user_date_of_birth: str
+
+class User(BaseModel):
+    id: str = Field(..., alias="_id", description="The MongoDB ObjectId of the user")
+    user_id: str
+    user_first_name: str
+    user_last_name: str
+    user_about: str
+    user_image: str
+    user_date_of_birth: str
+
+# Add a new user
+@app.post("/add_user")
+async def add_user(user: AddUser):
+    try:
+
+       # Prepare the document to insert
+        user_document = {
+                "user_id": user.user_id,
+                "user_first_name": user.user_first_name,
+                "user_last_name": user.user_last_name,
+                "user_about": user.user_about,
+                "user_about": user.user_about,
+                "user_image": user.user_image,
+                "user_date_of_birth": user.user_date_of_birth,
+        }
+
+        # Insert the document into the collection
+        collection = database[USER_COLLECTION]
+
+        # Check if the user already exists
+        existing_user = collection.find_one({"user_id": user.user_id})
+        if existing_user:
+            raise HTTPException(status_code=400, detail="This user already exists.")
+
+        result = collection.insert_one(user_document)
+
+        # Return success message with the inserted ID
+        return {
+            "message": "User added successfully",
+            "user_id": str(result.inserted_id),
+        }
+    
+    except Exception as e:
+        # Log unexpected errors
+        logger.error(f"An error occurred in add_user function: {e}")
+        raise HTTPException(status_code=500, detail=f"add_user: {e}")
+
+
+# Get the users
+@app.get("/users")
+def get_users():
+    try:
+        collection = database[USER_COLLECTION]
+        items = collection.find()  # Retrieve all documents
+        serialized_users = [serialize_item(item) for item in items]  # Serialize ObjectId
+        return serialized_users
+    except Exception as e:
+        # Log unexpected errors
+        logger.error(f"An error occurred in get_users function: {e}")
+        raise HTTPException(status_code=500, detail=f"get_users: {e}")
+
+# ------------------------------------------------------------------------------------------------------------------------------
+# Get user by id
+@app.get("/get_user_by_id")
+async def get_user_by_id(user_id: str):
+    try:
+
+        # Fetch the user document based on user_id
+        collection = database[USER_COLLECTION]
+        user = collection.find_one({"user_id": user_id})
+
+        # Check if the user exists
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Convert MongoDB ObjectId to string for JSON serialization
+        user["_id"] = str(user["_id"])
+
+        return user
+
+    except Exception as e:
+        # Log unexpected errors
+        logger.error(f"An error occurred in get_user_by_id function: {e}")
+        raise HTTPException(status_code=500, detail=f"get_user_by_id: {e}")
+
+
+# ------------------------------------------------------------------------------------------------------------------------------
+# Edit the user
+@app.put("/edit_user")
+async def edit_user(user: User):
+    try:
+        print("user::: ", user)
+        # Validate the user ID
+        if not ObjectId.is_valid(user.id):
+            raise HTTPException(status_code=400, detail="Invalid user ID format")
+        
+        # Convert _id to ObjectId
+        user_obj_id = ObjectId(user.id)
+
+        # Convert the User model to a dictionary
+        update_data = user.dict(by_alias=True)
+
+        # W remove `_id` from the update_data dictionary since `_id` is the MongoDB identifier
+        update_data.pop("_id", None)
+
+        # Ensure there's data to update
+        if not update_data:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        # Update the user information
+        collection = database[USER_COLLECTION]
+        result = collection.update_one(
+            {"_id": user_obj_id}, {"$set": update_data}
+        )
+
+        # Check if the user was found and updated
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        return {"message": "User updated successfully"}
+
+    except Exception as e:
+        # Log unexpected errors
+        logger.error(f"An error occurred in edit_user function: {e}")
+        raise HTTPException(status_code=500, detail=f"edit_user: {e}")
+    
+
+
+# ------------------------------------------------------------------------------------------------------------------------------
+@app.delete("/delete_user")
+async def delete_user(user_id: str):
+    try:
+        # Ensure `user_id` is provided and valid
+        if not user_id:
+            raise HTTPException(status_code=400, detail="user_id is required")
+
+        # Attempt to delete the user
+        collection = database[USER_COLLECTION]
+        result = collection.delete_one({"user_id": user_id})
+
+        # Check if the user was found and deleted
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        return {"message": "User deleted successfully"}
+
+    except Exception as e:
+        # Log unexpected errors
+        logger.error(f"An error occurred in delete_user function: {e}")
+        raise HTTPException(status_code=500, detail=f"delete_user: {e}")
