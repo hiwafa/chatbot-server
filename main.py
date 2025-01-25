@@ -5,11 +5,23 @@ from bson import ObjectId
 import logging
 import random
 
+
+from fastapi.middleware.cors import CORSMiddleware
+
+
 # ------------------------------------------------------------------------------------------------------------------------------
 # initializations
 
-
 app = FastAPI()
+
+# Allow all origins (for development purposes)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Adjust this for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Configure logging
 logging.basicConfig(level=logging.ERROR)
@@ -32,7 +44,7 @@ def get_questions():
         collection = database[COLLECTION_NAME]
         items = collection.find()  # Retrieve all documents
         serialized_items = [serialize_item(item) for item in items]  # Serialize ObjectId
-        return {"data": serialized_items}
+        return serialized_items
     except Exception as e:
         # Log unexpected errors
         logger.error(f"An error occurred in get_questions function: {e}")
@@ -63,6 +75,37 @@ async def get_random_answer(question_text: str):
         # Log unexpected errors
         logger.error(f"An error occurred in get_random_answer function: {e}")
         raise HTTPException(status_code=500, detail=f"get_random_answer: {e}")
+
+
+# ------------------------------------------------------------------------------------------------------------------------------
+# Get question by id
+@app.get("/get_question_by_id")
+async def get_question_by_id(question_id: str):
+    try:
+
+         # Validate the question ID
+        if not ObjectId.is_valid(question_id):
+            raise HTTPException(status_code=400, detail="Invalid question ID format")
+        
+        # Convert question_id to ObjectId
+        question_obj_id = ObjectId(question_id)
+
+        # Fetch the question document based on question_text
+        collection = database[COLLECTION_NAME]
+        question = collection.find_one({"_id": question_obj_id})
+
+        # Check if the question exists
+        if not question:
+            raise HTTPException(status_code=404, detail="Question not found")
+        # Convert MongoDB ObjectId to string for JSON serialization
+        question["_id"] = str(question["_id"])
+
+        return question
+
+    except Exception as e:
+        # Log unexpected errors
+        logger.error(f"An error occurred in get_question_by_id function: {e}")
+        raise HTTPException(status_code=500, detail=f"get_question_by_id: {e}")
 
 
 # ------------------------------------------------------------------------------------------------------------------------------
