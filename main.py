@@ -58,7 +58,7 @@ async def get_random_answer(question_text: str):
     try:
         # Fetch the question document based on question_text
         collection = database[COLLECTION_NAME]
-        question = collection.find_one({"question_text": question_text})
+        question = collection.find_one({"question_text": {"$regex": question_text, "$options": "i"}})
 
         # Check if the question exists
         if not question:
@@ -69,8 +69,7 @@ async def get_random_answer(question_text: str):
         if not answers:
             raise HTTPException(status_code=404, detail="No answers found for the question")
 
-        random_answer = random.choice(answers)
-        return {"random_answer": random_answer}
+        return random.choice(answers)
 
     except Exception as e:
         # Log unexpected errors
@@ -147,6 +146,28 @@ async def add_question(question: Question):
 
 
 
+# ------------------------------------------------------------------------------------------------------------------------------
+# Endpoint to add multiple questions
+@app.post("/add_multiple_questions")
+async def add_multiple_questions(questions: list[Question]):
+    try:
+
+        collection = database[COLLECTION_NAME]
+
+        # Convert Pydantic models to dictionary and insert into MongoDB
+        questions_dict = [question.dict() for question in questions]
+        result = collection.insert_many(questions_dict)
+        
+        # Return the inserted ids
+        return {
+            "message": "Questions added successfully",
+            "question_ids": str(result.inserted_ids),
+        }
+
+    
+    except Exception as e:
+        logger.error(f"An error occurred in add_multiple_questions function: {e}")
+        raise HTTPException(status_code=500, detail=f"add_multiple_questions: {e}")
 # ------------------------------------------------------------------------------------------------------------------------------
 # Edit the question text
 @app.put("/edit_question_text")
@@ -370,6 +391,7 @@ class AddUser(BaseModel):
     user_about: str
     user_image: str
     user_date_of_birth: str
+    user_role: str
 
 class User(BaseModel):
     id: str = Field(..., alias="_id", description="The MongoDB ObjectId of the user")
@@ -379,6 +401,7 @@ class User(BaseModel):
     user_about: str
     user_image: str
     user_date_of_birth: str
+    user_role: str
 
 # Add a new user
 @app.post("/add_user")
@@ -388,6 +411,7 @@ async def add_user(user: AddUser):
        # Prepare the document to insert
         user_document = {
                 "user_id": user.user_id,
+                "user_role": user.user_role,
                 "user_first_name": user.user_first_name,
                 "user_last_name": user.user_last_name,
                 "user_about": user.user_about,
