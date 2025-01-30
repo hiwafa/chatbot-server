@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 from bson import ObjectId
 import logging
 import random
-
+import re
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -53,30 +53,85 @@ def get_questions():
 
 # ------------------------------------------------------------------------------------------------------------------------------
 # Get a random answer based on question text
+# @app.get("/random_answer")
+# async def get_random_answer(question_text: str):
+#     try:
+#         # Fetch the question document based on question_text
+#         collection = database[COLLECTION_NAME]
+#         question = collection.find_one({"question_text": {"$regex": question_text, "$options": "i"}})
+
+#         # Check if the question exists
+#         if not question:
+#             raise HTTPException(status_code=404, detail="Question not found")
+
+#         # Get the answers and pick a random one
+#         answers = question.get("question_answers", [])
+#         if not answers:
+#             raise HTTPException(status_code=404, detail="No answers found for the question")
+
+#         return random.choice(answers)
+
+#     except Exception as e:
+#         # Log unexpected errors
+#         logger.error(f"An error occurred in get_random_answer function: {e}")
+#         raise HTTPException(status_code=500, detail=f"get_random_answer: {e}")
+
+def clean_text(text: str) -> str:
+    """Convert text to lowercase, remove punctuation, and escape regex characters."""
+    text = text.lower().strip()
+    text = re.sub(r"[^\w\s]", "", text)  # Remove punctuation
+    return text
+
 @app.get("/random_answer")
 async def get_random_answer(question_text: str):
     try:
-        # Fetch the question document based on question_text
+        if not question_text.strip():
+            raise HTTPException(status_code=400, detail="Invalid question_text: Cannot be empty.")
+
+        # Detect multiple questions and identify the delimiter
+        delimiters = [", und ", ", oder ", " und ", ", ", ",und ", ",oder"]
+        detected_delimiter = None
+
+        for delimiter in delimiters:
+            if delimiter in question_text:
+                detected_delimiter = delimiter
+                questions = [clean_text(q) for q in question_text.split(delimiter) if q.strip()]
+                break
+        else:
+            questions = [clean_text(question_text)]  # Single question case
+
+        if not questions:
+            raise HTTPException(status_code=400, detail="No valid questions detected.")
+
+        # Perform a single MongoDB query using $or to fetch all matching questions at once
         collection = database[COLLECTION_NAME]
-        question = collection.find_one({"question_text": {"$regex": question_text, "$options": "i"}})
+        query = {"$or": [{"question_text": {"$regex": re.escape(q), "$options": "i"}} for q in questions]}
+        question_docs = list(collection.find(query))
 
-        # Check if the question exists
-        if not question:
-            raise HTTPException(status_code=404, detail="Question not found")
+        if not question_docs:
+            return "No answers found for the given questions."
 
-        # Get the answers and pick a random one
-        answers = question.get("question_answers", [])
-        if not answers:
-            raise HTTPException(status_code=404, detail="No answers found for the question")
+        # Map found questions to answers
+        question_answer_map = {
+            clean_text(q["question_text"]): random.choice(q.get("question_answers", ["No answers available"]))
+            for q in question_docs
+        }
 
-        return random.choice(answers)
+        # Prepare the response
+        answers = [
+            question_answer_map.get(q, f"No answer found for: {q}")  # Use found answer or a default message
+            for q in questions
+        ]
+
+        # Join answers using the detected delimiter or default to ", "
+        response_text = detected_delimiter.join(answers) if detected_delimiter else ", ".join(answers)
+
+        return response_text
 
     except Exception as e:
-        # Log unexpected errors
-        logger.error(f"An error occurred in get_random_answer function: {e}")
+        logger.error(f"An error occurred in get_random_answer: {e}")
         raise HTTPException(status_code=500, detail=f"get_random_answer: {e}")
-
-
+    
 # ------------------------------------------------------------------------------------------------------------------------------
 # Get question by id
 @app.get("/get_question_by_id")
